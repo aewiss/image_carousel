@@ -1,0 +1,324 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
+
+enum CarouselType {
+  lottie,
+  image,
+}
+
+class Carousel extends StatefulWidget {
+  const Carousel({
+    required this.carouselAssets,
+    required this.activeColor,
+    required this.inactiveColor,
+    required this.backgroundColor,
+    required this.indicatorCircleSize,
+    required this.indicatorCirclePadding,
+    required this.scrollingTime,
+    super.key,
+  });
+
+  final Color activeColor;
+  final Color inactiveColor;
+  final List<CarouselAsset> carouselAssets;
+  final Color backgroundColor;
+  final double indicatorCircleSize;
+  final double indicatorCirclePadding;
+  final int scrollingTime;
+
+  @override
+  State<Carousel> createState() => _CarouselState();
+}
+
+class _CarouselState extends State<Carousel> with TickerProviderStateMixin {
+  late final AnimationController _animationController;
+  late final Duration _pageControllerDuration;
+  late final PageController _pageController;
+  late Timer _timer;
+
+  final Curve _pageControllerAnimation = Curves.fastEaseInToSlowEaseOut;
+  final ScrollPhysics _physics = const NeverScrollableScrollPhysics();
+
+  int _currentIndex = 0;
+  bool isScrolling = false;
+
+  @override
+  void initState() {
+    _pageController = PageController();
+    _pageControllerDuration = const Duration(milliseconds: 1000);
+
+    _initTimer();
+
+    _animationController = AnimationController(vsync: this);
+    _animationController.addListener(_checkAnimationStatus);
+
+    super.initState();
+  }
+
+  /// Initializes a timer for automatically scrolling to the next page
+  void _initTimer() {
+    final Timer timer = Timer.periodic(
+      Duration(seconds: widget.scrollingTime),
+      (timer) async {
+        final CarouselAsset carouselAsset =
+            widget.carouselAssets[_currentIndex];
+        final int currentIndex = widget.carouselAssets.indexWhere(
+          (e) => e.id == carouselAsset.id && e.type == CarouselType.lottie,
+        );
+
+        if (_currentIndex != currentIndex) {
+          // Check if it's the last element, then either show the initial page
+          // or go to the next page
+          final bool isLastElement =
+              _currentIndex == widget.carouselAssets.length - 1;
+          if (isLastElement) {
+            _showInitialPage(duration: _pageControllerDuration);
+          } else {
+            _nextPage();
+          }
+        }
+      },
+    );
+
+    setState(() {
+      _timer = timer;
+    });
+  }
+
+  /// Moves to the next page if the Lottie animation is completed
+  void _checkAnimationStatus() {
+    if (widget.carouselAssets[_currentIndex].type == CarouselType.lottie &&
+        _animationController.status == AnimationStatus.completed) {
+      _nextPage();
+    }
+  }
+
+  /// Moves to the next page and restarts the Lottie animation
+  void _nextPage() {
+    _timer.cancel();
+
+    if (_animationController.isAnimating) {
+      _animationController.stop();
+    }
+
+    setState(() {
+      isScrolling = true;
+    });
+
+    _pageController
+        .nextPage(
+          duration: _pageControllerDuration,
+          curve: _pageControllerAnimation,
+        )
+        .whenComplete(
+          () => setState(() {
+            isScrolling = false;
+          }),
+        );
+
+    _restartLottieAnimation();
+    _initTimer();
+  }
+
+  /// Moves to the previous page and restarts the Lottie animation
+  void _previousPage() {
+    _timer.cancel();
+
+    setState(() {
+      isScrolling = true;
+    });
+
+    _pageController
+        .previousPage(
+          duration: _pageControllerDuration,
+          curve: _pageControllerAnimation,
+        )
+        .whenComplete(
+          () => setState(() {
+            isScrolling = false;
+          }),
+        );
+
+    _restartLottieAnimation();
+    _initTimer();
+  }
+
+  /// Shows the initial page and restarts the Lottie animation
+  void _showInitialPage({required Duration duration}) {
+    _timer.cancel();
+
+    setState(() {
+      isScrolling = true;
+    });
+
+    _pageController
+        .animateToPage(
+          _pageController.initialPage,
+          duration: duration,
+          curve: Curves.fastOutSlowIn,
+        )
+        .whenComplete(
+          () => setState(() {
+            isScrolling = false;
+          }),
+        );
+
+    _restartLottieAnimation();
+    _initTimer();
+  }
+
+  /// Restarts the Lottie animation if the current index
+  /// corresponds to a Lottie asset
+  void _restartLottieAnimation() {
+    final int lottieFileCount = widget.carouselAssets
+        .where((e) => e.type == CarouselType.lottie)
+        .length;
+
+    if (lottieFileCount > 1 ||
+        (_animationController.isDismissed ||
+            _animationController.isCompleted)) {
+      final carouselAsset = widget.carouselAssets[_currentIndex];
+      final currentIndex = widget.carouselAssets.indexWhere(
+        (e) => e.id == carouselAsset.id && e.type == CarouselType.lottie,
+      );
+
+      if (_currentIndex == currentIndex) {
+        _animationController
+          ..reset()
+          ..forward();
+      }
+    }
+  }
+
+  /// Stops the timer
+  void _stopTimer() {
+    _timer.cancel();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    _animationController.dispose();
+    _timer.cancel();
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onHorizontalDragEnd: (details) {
+        if (!isScrolling) {
+          if (details.primaryVelocity! > 0) {
+            if ((_currentIndex - 1) >= _pageController.initialPage) {
+              _previousPage();
+            }
+          } else if (details.primaryVelocity! < 0) {
+            if ((_currentIndex + 1) == widget.carouselAssets.length) {
+              _showInitialPage(duration: _pageControllerDuration);
+            } else {
+              _nextPage();
+            }
+          }
+        }
+      },
+      onTapDown: (_) =>
+          widget.carouselAssets[_currentIndex].type == CarouselType.image
+              ? _stopTimer()
+              : null,
+      onTapUp: (_) =>
+          widget.carouselAssets[_currentIndex].type == CarouselType.image
+              ? _initTimer()
+              : null,
+      child: Container(
+        color: widget.backgroundColor,
+        child: Column(
+          children: [
+            Expanded(
+              child: PageView.builder(
+                controller: _pageController,
+                padEnds: false,
+                physics: _physics,
+                onPageChanged: (index) {
+                  if (index == widget.carouselAssets.length) {
+                    _showInitialPage(duration: _pageControllerDuration);
+                  } else {
+                    setState(() {
+                      _currentIndex = index;
+                    });
+                  }
+                },
+                itemBuilder: (context, index) {
+                  final CarouselAsset carouselAsset =
+                      index > (widget.carouselAssets.length - 1)
+                          ? widget.carouselAssets[_currentIndex]
+                          : widget.carouselAssets[index];
+
+                  switch (carouselAsset.type) {
+                    case CarouselType.lottie:
+                      return Lottie.asset(
+                        carouselAsset.path,
+                        repeat: false,
+                        controller: _animationController,
+                        fit: BoxFit.cover,
+                        onLoaded: (comp) => _animationController
+                          ..duration = comp.duration
+                          ..forward(),
+                      );
+
+                    case CarouselType.image:
+                      return Image.asset(
+                        carouselAsset.path,
+                        fit: BoxFit.cover,
+                      );
+                  }
+                },
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(
+                widget.carouselAssets.length,
+                (index) => _buildIndicators(index),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIndicators(int index) {
+    return Padding(
+      padding: EdgeInsets.all(widget.indicatorCirclePadding),
+      child: Container(
+        width: widget.indicatorCircleSize,
+        height: widget.indicatorCircleSize,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: _currentIndex == index
+              ? widget.activeColor
+              : widget.inactiveColor,
+        ),
+      ),
+    );
+  }
+}
+
+class CarouselAsset {
+  CarouselAsset({
+    required this.id,
+    required this.path,
+    required this.type,
+  });
+
+  /// The unique identifier for the carousel asset.
+  final String id;
+
+  /// The path to the asset.
+  final String path;
+
+  /// The type of the carousel asset .
+  final CarouselType type;
+}
